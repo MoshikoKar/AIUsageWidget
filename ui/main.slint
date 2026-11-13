@@ -1,0 +1,272 @@
+export struct ServiceView {
+    name: string,
+    plan: string,
+    message: string,
+    status: int,        // 0 waiting, 1 good, 2 degraded, 3 bad
+    session: string,
+    daily: string,
+    weekly: string,
+    monthly: string,
+    accent: color,
+}
+
+global Palette {
+    out property <color> card: #111827;
+    out property <color> tile: #ffffff0d;
+    out property <color> text: #e5e7eb;
+    out property <color> muted: #9ca3af;
+    out property <color> good: #3ddc84;
+    out property <color> warn: #ffb300;
+    out property <color> bad: #ff5252;
+    out property <color> idle: #6b7280;
+
+    public pure function status-color(s: int) -> color {
+        return s == 1 ? self.good : s == 2 ? self.warn : s == 3 ? self.bad : self.idle;
+    }
+}
+
+component IconButton inherits Rectangle {
+    in property <string> glyph;
+    in property <color> hover-color: #ffffff1f;
+    callback clicked;
+
+    width: 24px;
+    height: 20px;
+    border-radius: 5px;
+    background: ta.has-hover ? hover-color : transparent;
+
+    Path {
+        width: 8px;
+        height: 8px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: root.glyph;
+        stroke: ta.has-hover ? white : Palette.text;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        fill: transparent;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component WinCell inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <color> accent;
+    spacing: 0px;
+    width: 52px;
+    Text {
+        text: root.label;
+        color: Palette.muted;
+        font-size: 8px;
+        horizontal-alignment: center;
+    }
+    Text {
+        text: root.value;
+        color: root.value == "-" ? Palette.muted : root.accent;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: center;
+    }
+}
+
+component Row inherits Rectangle {
+    in property <ServiceView> s;
+    property <color> accent: s.status == 0 ? Palette.idle : (s.message != "" && s.status == 3 ? Palette.bad : Palette.status-color(s.status));
+
+    height: s.message == "" ? 56px : 68px;
+    border-radius: 8px;
+    background: Palette.tile;
+
+    VerticalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 4px;
+
+        HorizontalLayout {
+            height: 16px;
+            spacing: 6px;
+            Rectangle {
+                width: 6px;
+                Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    y: 5px;
+                    border-radius: 3px;
+                    background: s.accent;
+                }
+            }
+            Text {
+                text: s.name;
+                color: Palette.text;
+                font-size: 12px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: s.plan;
+                color: Palette.muted;
+                font-size: 9px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+
+        if s.message == "": HorizontalLayout {
+            spacing: 2px;
+            WinCell { label: "session"; value: s.session; accent: root.accent; }
+            WinCell { label: "daily"; value: s.daily; accent: root.accent; }
+            WinCell { label: "weekly"; value: s.weekly; accent: root.accent; }
+            WinCell { label: "monthly"; value: s.monthly; accent: root.accent; }
+        }
+
+        if s.message != "": Text {
+            text: s.message;
+            color: Palette.bad;
+            font-size: 9px;
+            overflow: elide;
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    in property <[ServiceView]> services;
+    in property <string> subtitle: "loading usage...";
+    in property <string> status-text: "starting...";
+    in property <int> overall: 0;
+    in-out property <bool> on-top: true;
+    in-out property <bool> locked: false;
+    in-out property <bool> startup: false;
+
+    callback drag(length, length);
+    callback hide-clicked();
+    callback quit-clicked();
+    callback toggle-top();
+    callback toggle-lock();
+    callback toggle-startup();
+    callback edit-config();
+    callback reload-config();
+    callback check-update();
+    in property <string> version;
+
+    no-frame: true;
+    always-on-top: root.on-top;
+    background: transparent;
+    title: "AIUsageWidget";
+    icon: @image-url("../assets/icon.png");
+    width: 300px;
+
+    Rectangle {
+        background: Palette.card;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: #ffffff1f;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 5px;
+
+            Rectangle {
+                height: 26px;
+                TouchArea {
+                    mouse-cursor: root.locked ? default : move;
+                    moved => {
+                        if (!root.locked) {
+                            root.drag(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Image {
+                        source: @image-url("../assets/icon.png");
+                        width: 20px;
+                        height: 20px;
+                        y: 3px;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 0px;
+                        Text {
+                            text: "AI Usage";
+                            color: Palette.text;
+                            font-size: 11px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: root.subtitle;
+                            color: Palette.muted;
+                            font-size: 8px;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: pill.preferred-width + 12px;
+                        height: 15px;
+                        y: 5px;
+                        border-radius: 8px;
+                        background: Palette.status-color(root.overall).with-alpha(0.18);
+                        pill := Text {
+                            text: root.status-text;
+                            color: Palette.status-color(root.overall);
+                            font-size: 8px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    IconButton {
+                        y: 3px;
+                        glyph: "M 1 1 L 9 9 M 9 1 L 1 9";
+                        clicked => { root.hide-clicked(); }
+                    }
+                }
+            }
+
+            for s in root.services: Row { s: s; }
+        }
+
+        ContextMenuArea {
+            Menu {
+                MenuItem {
+                    title: root.on-top ? "✓ Always on top" : "Always on top";
+                    activated => { root.toggle-top(); }
+                }
+                MenuItem {
+                    title: root.locked ? "✓ Lock position" : "Lock position";
+                    activated => { root.toggle-lock(); }
+                }
+                MenuItem {
+                    title: root.startup ? "✓ Start with Windows" : "Start with Windows";
+                    activated => { root.toggle-startup(); }
+                }
+                MenuSeparator {}
+                MenuItem {
+                    title: "Edit config...";
+                    activated => { root.edit-config(); }
+                }
+                MenuItem {
+                    title: "Reload config";
+                    activated => { root.reload-config(); }
+                }
+                MenuSeparator {}
+                MenuItem {
+                    title: "Check for updates (v" + root.version + ")";
+                    activated => { root.check-update(); }
+                }
+                MenuSeparator {}
+                MenuItem {
+                    title: "Hide to tray";
+                    activated => { root.hide-clicked(); }
+                }
+            }
+        }
+    }
+}

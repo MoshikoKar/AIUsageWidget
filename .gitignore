@@ -1,0 +1,36 @@
+/target
+/dist
+
+# Local / packaged binaries (built via build.ps1)
+/AIUsageWidget.exe
+*.exe
+!installer/
+
+# Legacy PowerShell widget (kept for reference only)
+/backup-legacy/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+credentials.json
+**/secrets/**
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / local
+.idea/
+*.swp
+*.swo
+
+# Rust / tooling
+**/*.rs.bk
+.cargo-cache/
+
+# Drafts
+*draft*

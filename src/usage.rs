@@ -1,0 +1,221 @@
+//! Usage snapshot API: refresh worker + status math.
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::config::{self, Config};
+use crate::history;
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Window {
+    pub pct: f64,
+    #[serde(default)]
+    pub reset: Option<String>,
+    #[serde(default)]
+    pub derived: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct UsageWindows {
+    #[serde(default)]
+    pub session: Option<Window>,
+    #[serde(default)]
+    pub daily: Option<Window>,
+    #[serde(default)]
+    pub weekly: Option<Window>,
+    #[serde(default)]
+    pub monthly: Option<Window>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ServiceSnapshot {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub status: String,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub plan: Option<String>,
+    #[serde(default)]
+    pub windows: UsageWindows,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Snapshot {
+    pub services: Vec<ServiceSnapshot>,
+    pub fetched_at: Option<Instant>,
+    pub fetching: bool,
+    pub last_error: Option<String>,
+}
+
+pub type Shared = Arc<Mutex<Snapshot>>;
+
+/// Status: 0 waiting, 1 good, 2 degraded, 3 bad.
+pub fn window_status(pct: f64, warn: f64, bad: f64) -> i32 {
+    if pct >= bad {
+        3
+    } else if pct >= warn {
+        2
+    } else {
+        1
+    }
+}
+
+pub fn service_status(s: &ServiceSnapshot, warn: f64, bad: f64) -> i32 {
+    if s.status == "error" {
+        return 3;
+    }
+    if s.status != "ok" && s.status != "manual" {
+        return 0;
+    }
+    let mut worst = 0;
+    for w in [&s.windows.session, &s.windows.daily, &s.windows.weekly, &s.windows.monthly]
+        .into_iter()
+        .flatten()
+    {
+        worst = worst.max(window_status(w.pct, warn, bad));
+    }
+    if worst == 0 {
+        1 // fetched with no windows still counts as ok/idle-good
+    } else {
+        worst
+    }
+}
+
+fn scripts_dir() -> Option<PathBuf> {
+    // Dev: <repo>/scripts ; installed: <exe dir>/scripts
+    if let Some(d) = config::exe_dir() {
+        let next = d.join("scripts");
+        if next.join("fetch.ps1").exists() {
+            return Some(next);
+        }
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts");
+    if manifest.join("fetch.ps1").exists() {
+        Some(manifest)
+    } else {
+        None
+    }
+}
+
+fn run_fetch(cfg: &Config) -> Result<Vec<ServiceSnapshot>, String> {
+    let dir = scripts_dir().ok_or_else(|| "scripts/fetch.ps1 not found next to the app".to_string())?;
+    let script = dir.join("fetch.ps1");
+    let payload = config::fetch_payload(cfg);
+    let tmp = std::env::temp_dir().join(format!("aiuw-fetch-{}.json", std::process::id()));
+    std::fs::write(&tmp, &payload).map_err(|e| format!("could not write temp config: {e}"))?;
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        &script.to_string_lossy(),
+        "-ConfigPath",
+        &tmp.to_string_lossy(),
+    ])
+    .current_dir(&dir)
+    .creation_flags(crate::sys::NO_WINDOW);
+    if cfg.demo {
+        cmd.arg("-Demo");
+    }
+    let out = cmd.output().map_err(|e| format!("could not run fetch.ps1: {e}"))?;
+    let _ = std::fs::remove_file(&tmp);
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if !out.status.success() {
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+    // Last non-empty line is the JSON array (PowerShell may write warnings).
+    let json_line = stdout.lines().rev().find(|l| l.trim().starts_with('[')).unwrap_or(&stdout);
+    serde_json::from_str(json_line).map_err(|e| format!("bad fetch JSON: {e}\n{stdout}"))
+}
+
+/// Background refresher. First fetch is immediate; then every `refresh_minutes`.
+pub fn spawn(cfg: Config, stop: Arc<std::sync::atomic::AtomicBool>) -> Shared {
+    let shared = Arc::new(Mutex::new(Snapshot { fetching: true, ..Default::default() }));
+    let shared2 = shared.clone();
+    std::thread::spawn(move || {
+        let mut hist = history::load();
+        let mut next = Instant::now();
+        loop {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            if Instant::now() >= next {
+                {
+                    let mut g = shared2.lock().unwrap();
+                    g.fetching = true;
+                }
+                // Re-read config each cycle so Edit config + wait works without full restart
+                // for refresh interval / demo / thresholds (services list still needs Reload).
+                let live = config::load();
+                let use_cfg = Config {
+                    services: cfg.services.clone(), // services change requires Reload
+                    ..live
+                };
+                match run_fetch(&use_cfg) {
+                    Ok(mut services) => {
+                        history::apply_daily(&mut services, &mut hist, use_cfg.demo);
+                        if !use_cfg.demo {
+                            history::save(&hist);
+                        }
+                        let mut g = shared2.lock().unwrap();
+                        g.services = services;
+                        g.fetched_at = Some(Instant::now());
+                        g.fetching = false;
+                        g.last_error = None;
+                    }
+                    Err(e) => {
+                        let mut g = shared2.lock().unwrap();
+                        g.fetching = false;
+                        g.last_error = Some(e);
+                        if g.fetched_at.is_none() {
+                            g.services.clear();
+                        }
+                    }
+                }
+                let mins = config::load().refresh_minutes.max(1);
+                next = Instant::now() + Duration::from_secs(mins * 60);
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    });
+    shared
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_thresholds() {
+        assert_eq!(window_status(10.0, 70.0, 90.0), 1);
+        assert_eq!(window_status(70.0, 70.0, 90.0), 2);
+        assert_eq!(window_status(90.0, 70.0, 90.0), 3);
+    }
+
+    #[test]
+    fn service_error_is_bad() {
+        let s = ServiceSnapshot {
+            id: "x".into(),
+            name: "X".into(),
+            color: "#fff".into(),
+            kind: "claude".into(),
+            status: "error".into(),
+            message: Some("no".into()),
+            plan: None,
+            windows: UsageWindows::default(),
+        };
+        assert_eq!(service_status(&s, 70.0, 90.0), 3);
+    }
+}
