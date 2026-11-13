@@ -168,17 +168,17 @@ function Get-Cursor {
     $report = @()
     foreach ($c in @($info.candidates)) {
         $short = ($c.key -replace '^secret://', 's://')
-        if ($short.Length -gt 48) { $short = $short.Substring(0, 48) + '…' }
+        if ($short.Length -gt 48) { $short = $short.Substring(0, 48) + '...' }
         $tok = $null
-        try { $tok = Reveal-Token $c.b64 $ls 'Cursor' -AllowOpaque } catch { $report += "$short → decrypt failed"; continue }
+        try { $tok = Reveal-Token $c.b64 $ls 'Cursor' -AllowOpaque } catch { $report += "$short -> decrypt failed"; continue }
         if ($tok -match '^eyJ[\w-]+\.[\w-]+\.[\w-]+$') {
             $exp = $null; try { $exp = (Decode-Jwt $tok).exp } catch {}
-            if ($exp -and [DateTimeOffset]::FromUnixTimeSeconds([int64]$exp).UtcDateTime -lt [DateTime]::UtcNow) { $report += "$short → expired"; continue }
+            if ($exp -and [DateTimeOffset]::FromUnixTimeSeconds([int64]$exp).UtcDateTime -lt [DateTime]::UtcNow) { $report += "$short -> expired"; continue }
         }
         try { return (Get-CursorUsage $tok $mid $ver $backend) }
         catch {
             $code = $null; try { $code = [int]$_.Exception.Response.StatusCode } catch {}
-            if ($code) { $report += "$short → $code" } else { $report += "$short → $($_.Exception.Message)" }
+            if ($code) { $report += "$short -> $code" } else { $report += "$short -> $($_.Exception.Message)" }
         }
     }
     throw "Cursor rejected all tokens | server=$backend | $($report -join '; ')"

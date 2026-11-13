@@ -7,7 +7,7 @@
 AppId={{FC53E2D8-9BA7-4EE2-AB84-787F032F325A}
 AppName=AIUsageWidget
 AppVersion={#AppVersion}
-AppPublisher=AIUsageWidget
+AppPublisher=Teknic
 DefaultDirName={autopf}\AIUsageWidget
 DefaultGroupName=AIUsageWidget
 PrivilegesRequired=lowest

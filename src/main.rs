@@ -47,6 +47,22 @@ fn fmt_pct(w: &Option<usage::Window>) -> SharedString {
     }
 }
 
+fn pct_or_missing(w: &Option<usage::Window>) -> f32 {
+    match w {
+        Some(w) => w.pct as f32,
+        None => -1.0,
+    }
+}
+
+/// Prefer weekly; fall back to monthly (Cursor only reports a billing-period / monthly window).
+fn week_or_month<'a>(s: &'a usage::ServiceSnapshot) -> &'a Option<usage::Window> {
+    if s.windows.weekly.is_some() {
+        &s.windows.weekly
+    } else {
+        &s.windows.monthly
+    }
+}
+
 fn parse_color(hex: &str) -> slint::Color {
     let h = hex.trim().trim_start_matches('#');
     if h.len() == 6 {
@@ -73,11 +89,16 @@ fn build_view(s: &usage::ServiceSnapshot, warn: f64, bad: f64) -> ServiceView {
         name: s.name.clone().into(),
         plan: plan.into(),
         message: message.into(),
+        kind: s.kind.clone().into(),
         status,
         session: fmt_pct(&s.windows.session),
         daily: fmt_pct(&s.windows.daily),
-        weekly: fmt_pct(&s.windows.weekly),
-        monthly: fmt_pct(&s.windows.monthly),
+        weekly: fmt_pct(week_or_month(s)),
+        monthly: "-".into(),
+        session_pct: pct_or_missing(&s.windows.session),
+        daily_pct: pct_or_missing(&s.windows.daily),
+        weekly_pct: pct_or_missing(week_or_month(s)),
+        monthly_pct: -1.0,
         accent: parse_color(&s.color),
     }
 }

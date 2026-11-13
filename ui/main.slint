@@ -2,11 +2,16 @@ export struct ServiceView {
     name: string,
     plan: string,
     message: string,
+    kind: string,
     status: int,        // 0 waiting, 1 good, 2 degraded, 3 bad
     session: string,
     daily: string,
     weekly: string,
     monthly: string,
+    session-pct: float, // -1 = n/a
+    daily-pct: float,
+    weekly-pct: float,
+    monthly-pct: float,
     accent: color,
 }
 
@@ -19,6 +24,10 @@ global Palette {
     out property <color> warn: #ffb300;
     out property <color> bad: #ff5252;
     out property <color> idle: #6b7280;
+    out property <color> brand: #26c8fe;
+    out property <color> track: #ffffff14;
+    out property <color> hairline: #ffffff1f;
+    out property <color> grid: #ffffff12;
 
     public pure function status-color(s: int) -> color {
         return s == 1 ? self.good : s == 2 ? self.warn : s == 3 ? self.bad : self.idle;
@@ -30,14 +39,14 @@ component IconButton inherits Rectangle {
     in property <color> hover-color: #ffffff1f;
     callback clicked;
 
-    width: 24px;
-    height: 20px;
-    border-radius: 5px;
+    width: 22px;
+    height: 18px;
+    border-radius: 4px;
     background: ta.has-hover ? hover-color : transparent;
 
     Path {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         viewbox-width: 10;
         viewbox-height: 10;
         commands: root.glyph;
@@ -52,93 +61,138 @@ component IconButton inherits Rectangle {
     }
 }
 
-component WinCell inherits VerticalLayout {
-    in property <string> label;
+// Compact percent + thin bar (table cell).
+component PctCell inherits VerticalLayout {
     in property <string> value;
-    in property <color> accent;
-    spacing: 0px;
-    width: 52px;
-    Text {
-        text: root.label;
-        color: Palette.muted;
-        font-size: 8px;
-        horizontal-alignment: center;
-    }
+    in property <float> pct;
+    in property <color> fill;
+    spacing: 3px;
+    width: 56px;
+    alignment: center;
+
     Text {
         text: root.value;
-        color: root.value == "-" ? Palette.muted : root.accent;
-        font-size: 12px;
+        color: root.pct < 0 ? Palette.muted : root.fill;
+        font-size: 11px;
         font-weight: 700;
         horizontal-alignment: center;
     }
+    Rectangle {
+        height: 3px;
+        border-radius: 1.5px;
+        background: Palette.track;
+        Rectangle {
+            height: parent.height;
+            width: root.pct < 0 ? 0px : parent.width * min(1, max(0, root.pct / 100));
+            border-radius: 1.5px;
+            background: root.fill;
+        }
+    }
 }
 
-component Row inherits Rectangle {
+component ServiceLogo inherits Image {
+    in property <string> kind;
+    width: 16px;
+    height: 16px;
+    source: kind == "claude" ? @image-url("../assets/logos/claude.png")
+          : kind == "codex" ? @image-url("../assets/logos/codex.png")
+          : kind == "grokbot" ? @image-url("../assets/logos/grokbot.png")
+          : kind == "cursor" ? @image-url("../assets/logos/cursor.png")
+          : @image-url("../assets/logos/generic.png");
+}
+
+component ColHead inherits Text {
+    in property <string> label;
+    text: root.label;
+    color: Palette.muted;
+    font-size: 8px;
+    font-weight: 700;
+    horizontal-alignment: center;
+    width: 56px;
+}
+
+component ServiceRow inherits Rectangle {
     in property <ServiceView> s;
-    property <color> accent: s.status == 0 ? Palette.idle : (s.message != "" && s.status == 3 ? Palette.bad : Palette.status-color(s.status));
+    property <color> tone: s.message != "" ? Palette.bad
+        : (s.status == 0 ? Palette.idle : Palette.status-color(s.status));
 
-    height: s.message == "" ? 56px : 68px;
-    border-radius: 8px;
-    background: Palette.tile;
+    height: 36px;
+    background: transparent;
 
-    VerticalLayout {
-        padding-left: 9px;
-        padding-right: 9px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-        spacing: 4px;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 0px;
 
+        // Identity
         HorizontalLayout {
-            height: 16px;
+            width: 168px;
             spacing: 6px;
-            Rectangle {
-                width: 6px;
-                Rectangle {
-                    width: 6px;
-                    height: 6px;
-                    y: 5px;
-                    border-radius: 3px;
-                    background: s.accent;
-                }
-            }
+            alignment: start;
+
+            ServiceLogo { kind: s.kind; y: 10px; }
+
             Text {
                 text: s.name;
                 color: Palette.text;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 700;
                 vertical-alignment: center;
-            }
-            Text {
-                text: s.plan;
-                color: Palette.muted;
-                font-size: 9px;
-                vertical-alignment: center;
                 overflow: elide;
-                horizontal-stretch: 1;
             }
+
+            if s.plan != "": Rectangle {
+                height: 14px;
+                y: 11px;
+                border-radius: 3px;
+                background: s.accent.with-alpha(0.22);
+                HorizontalLayout {
+                    padding-left: 5px;
+                    padding-right: 5px;
+                    Text {
+                        text: s.plan;
+                        color: s.accent;
+                        font-size: 8px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
         }
 
         if s.message == "": HorizontalLayout {
-            spacing: 2px;
-            WinCell { label: "session"; value: s.session; accent: root.accent; }
-            WinCell { label: "daily"; value: s.daily; accent: root.accent; }
-            WinCell { label: "weekly"; value: s.weekly; accent: root.accent; }
-            WinCell { label: "monthly"; value: s.monthly; accent: root.accent; }
+            width: 176px; // 3x56 + 2x4 gaps - must match header metrics strip
+            spacing: 4px;
+            PctCell { value: s.session; pct: s.session-pct; fill: root.tone; }
+            PctCell { value: s.daily; pct: s.daily-pct; fill: root.tone; }
+            PctCell { value: s.weekly; pct: s.weekly-pct; fill: root.tone; }
         }
 
         if s.message != "": Text {
             text: s.message;
             color: Palette.bad;
             font-size: 9px;
+            vertical-alignment: center;
             overflow: elide;
+            horizontal-stretch: 1;
         }
+    }
+
+    // Bottom hairline
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        width: parent.width;
+        background: Palette.grid;
     }
 }
 
 export component MainWindow inherits Window {
     in property <[ServiceView]> services;
-    in property <string> subtitle: "loading usage...";
-    in property <string> status-text: "starting...";
+    in property <string> subtitle: "loading...";
+    in property <string> status-text: "STARTING";
     in property <int> overall: 0;
     in-out property <bool> on-top: true;
     in-out property <bool> locked: false;
@@ -160,20 +214,21 @@ export component MainWindow inherits Window {
     background: transparent;
     title: "AIUsageWidget";
     icon: @image-url("../assets/icon.png");
-    width: 300px;
+    width: 392px;
 
     Rectangle {
         background: Palette.card;
-        border-radius: 12px;
+        border-radius: 10px;
         border-width: 1px;
-        border-color: #ffffff1f;
+        border-color: Palette.hairline;
 
         VerticalLayout {
-            padding: 8px;
-            spacing: 5px;
+            padding: 0px;
+            spacing: 0px;
 
+            // Header (drag)
             Rectangle {
-                height: 26px;
+                height: 28px;
                 TouchArea {
                     mouse-cursor: root.locked ? default : move;
                     moved => {
@@ -183,54 +238,117 @@ export component MainWindow inherits Window {
                     }
                 }
                 HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 6px;
                     spacing: 6px;
+
                     Image {
-                        source: @image-url("../assets/icon.png");
-                        width: 20px;
-                        height: 20px;
-                        y: 3px;
+                        source: @image-url("../assets/company-logo-header.png");
+                        height: 14px;
+                        width: 64px;
+                        y: 7px;
                     }
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 0px;
-                        Text {
-                            text: "AI Usage";
-                            color: Palette.text;
-                            font-size: 11px;
-                            font-weight: 700;
-                        }
-                        Text {
-                            text: root.subtitle;
-                            color: Palette.muted;
-                            font-size: 8px;
-                            overflow: elide;
-                        }
+                    Text {
+                        text: "AI Usage";
+                        color: Palette.brand;
+                        font-size: 10px;
+                        font-weight: 700;
+                        vertical-alignment: center;
                     }
+
                     Rectangle { horizontal-stretch: 1; }
+
+                    Text {
+                        text: root.subtitle;
+                        color: Palette.muted;
+                        font-size: 8px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
                     Rectangle {
-                        width: pill.preferred-width + 12px;
-                        height: 15px;
-                        y: 5px;
-                        border-radius: 8px;
+                        height: 14px;
+                        y: 7px;
+                        border-radius: 7px;
                         background: Palette.status-color(root.overall).with-alpha(0.18);
-                        pill := Text {
-                            text: root.status-text;
-                            color: Palette.status-color(root.overall);
-                            font-size: 8px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                            horizontal-alignment: center;
+                        HorizontalLayout {
+                            padding-left: 7px;
+                            padding-right: 7px;
+                            Text {
+                                text: root.status-text;
+                                color: Palette.status-color(root.overall);
+                                font-size: 8px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
                         }
                     }
+
                     IconButton {
-                        y: 3px;
+                        y: 5px;
                         glyph: "M 1 1 L 9 9 M 9 1 L 1 9";
                         clicked => { root.hide-clicked(); }
                     }
                 }
             }
 
-            for s in root.services: Row { s: s; }
+            Rectangle { height: 1px; background: Palette.grid; }
+
+            // Column headers (same 168 + 176 strip as ServiceRow)
+            Rectangle {
+                height: 22px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 4px;
+                    spacing: 0px;
+                    Rectangle { width: 168px; }
+                    HorizontalLayout {
+                        width: 176px;
+                        spacing: 4px;
+                        ColHead { label: "SESSION"; }
+                        ColHead { label: "DAILY"; }
+                        ColHead { label: "WEEKLY"; }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.grid; }
+
+            for s in root.services: ServiceRow { s: s; }
+
+            // Footer
+            Rectangle {
+                height: 18px;
+                background: #0b1220;
+                border-bottom-left-radius: 10px;
+                border-bottom-right-radius: 10px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 5px;
+                    Image {
+                        source: @image-url("../assets/company-mark.png");
+                        width: 10px;
+                        height: 10px;
+                        y: 4px;
+                    }
+                    Text {
+                        text: "teknic.cc";
+                        color: Palette.brand;
+                        font-size: 8px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: "v" + root.version;
+                        color: Palette.muted;
+                        font-size: 8px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
         }
 
         ContextMenuArea {

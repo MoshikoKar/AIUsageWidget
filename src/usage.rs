@@ -130,14 +130,46 @@ fn run_fetch(cfg: &Config) -> Result<Vec<ServiceSnapshot>, String> {
     }
     let out = cmd.output().map_err(|e| format!("could not run fetch.ps1: {e}"))?;
     let _ = std::fs::remove_file(&tmp);
-    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = decode_ps_output(&out.stdout);
+    let stderr = decode_ps_output(&out.stderr);
     if !out.status.success() {
         return Err(if stderr.is_empty() { stdout } else { stderr });
     }
     // Last non-empty line is the JSON array (PowerShell may write warnings).
-    let json_line = stdout.lines().rev().find(|l| l.trim().starts_with('[')).unwrap_or(&stdout);
-    serde_json::from_str(json_line).map_err(|e| format!("bad fetch JSON: {e}\n{stdout}"))
+    let json_line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim().starts_with('['))
+        .unwrap_or(&stdout);
+    // Strip illegal control chars (e.g. U+001A from a broken "->" glyph in messages).
+    let cleaned = strip_json_controls(json_line);
+    serde_json::from_str(&cleaned).map_err(|e| format!("bad fetch JSON: {e}\n{cleaned}"))
+}
+
+fn decode_ps_output(bytes: &[u8]) -> String {
+    // PowerShell 5.x may emit UTF-16 LE when stdout is redirected.
+    let text = if bytes.starts_with(&[0xFF, 0xFE]) {
+        let words: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&words)
+    } else if bytes.len() > 4 && bytes.iter().step_by(2).filter(|&&b| b == 0).count() > bytes.len() / 4 {
+        let words: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&words)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    text.trim().to_string()
+}
+
+fn strip_json_controls(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() && c != '\t' { ' ' } else { c })
+        .collect()
 }
 
 /// Background refresher. First fetch is immediate; then every `refresh_minutes`.

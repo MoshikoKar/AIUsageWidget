@@ -141,6 +141,8 @@ pub(crate) fn normalize(c: &mut Config) {
     }
     let mut seen = std::collections::HashSet::new();
     c.services.retain(|s| seen.insert(s.id.to_ascii_lowercase()));
+    // Drop Cursor - not shown in the compact grid (token fetch is unreliable).
+    c.services.retain(|s| !s.id.eq_ignore_ascii_case("cursor") && s.kind != "cursor");
     c.services.truncate(MAX_SERVICES);
     if c.refresh_minutes == 0 {
         c.refresh_minutes = 5;
@@ -160,7 +162,11 @@ pub fn load() -> Config {
     let p = path();
     match std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<Config>(&s).ok()) {
         Some(mut c) => {
+            let had_cursor = c.services.iter().any(|s| s.id.eq_ignore_ascii_case("cursor"));
             normalize(&mut c);
+            if had_cursor {
+                save(&c);
+            }
             c
         }
         None => {
@@ -240,5 +246,20 @@ mod tests {
         assert!(c.always_on_top && c.notifications && c.check_updates);
         assert_eq!(c.update_channel, "stable");
         assert_eq!(c.warn_pct, 70.0);
+    }
+
+    #[test]
+    fn normalize_removes_cursor() {
+        let mut c = Config {
+            services: vec![
+                svc("claude", "claude"),
+                svc("cursor", "cursor"),
+                svc("grokbot", "grokbot"),
+            ],
+            ..Config::default()
+        };
+        normalize(&mut c);
+        assert!(!c.services.iter().any(|s| s.id.eq_ignore_ascii_case("cursor")));
+        assert_eq!(c.services.len(), 2);
     }
 }
