@@ -54,7 +54,7 @@ fn pct_or_missing(w: &Option<usage::Window>) -> f32 {
     }
 }
 
-/// Prefer weekly; fall back to monthly (Cursor only reports a billing-period / monthly window).
+/// Prefer weekly; fall back to monthly when a provider only reports a billing-period window.
 fn week_or_month<'a>(s: &'a usage::ServiceSnapshot) -> &'a Option<usage::Window> {
     if s.windows.weekly.is_some() {
         &s.windows.weekly

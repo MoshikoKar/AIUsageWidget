@@ -25,9 +25,6 @@ function Copy-RuntimeFiles($dest) {
     $scripts = Join-Path $dest 'scripts'
     New-Item -ItemType Directory $scripts -Force | Out-Null
     Copy-Item (Join-Path $PSScriptRoot 'scripts\fetch.ps1') $scripts -Force
-    if (Test-Path (Join-Path $PSScriptRoot 'scripts\cursor_token.py')) {
-        Copy-Item (Join-Path $PSScriptRoot 'scripts\cursor_token.py') $scripts -Force
-    }
 }
 
 # Portable zip

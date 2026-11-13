@@ -45,7 +45,7 @@ Columns are session, daily, and weekly (weekly falls back to a monthly window wh
 | `notifications` | `true` | Toast on PROBLEM / recovery |
 | `x` / `y` | first run `40,40` | Restored if still on a monitor |
 
-Normalize: blank ids dropped, ids de-duplicated, max 12 services, thresholds clamped. Cursor entries are removed (token fetch is unreliable for the compact grid).
+Normalize: blank ids dropped, ids de-duplicated, max 12 services, thresholds clamped.
 
 Credentials are read from local Claude Code / Codex / Grok Bot logins at fetch time and sent only to that provider. They are not stored by this app.
 

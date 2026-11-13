@@ -19,7 +19,7 @@ pub struct ManualWindows {
 pub struct Service {
     pub id: String,
     pub name: String,
-    /// Provider kind: claude | codex | grokbot | cursor | manual
+    /// Provider kind: claude | codex | grokbot | manual
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default = "default_true")]
@@ -141,8 +141,8 @@ pub(crate) fn normalize(c: &mut Config) {
     }
     let mut seen = std::collections::HashSet::new();
     c.services.retain(|s| seen.insert(s.id.to_ascii_lowercase()));
-    // Drop Cursor - not shown in the compact grid (token fetch is unreliable).
-    c.services.retain(|s| !s.id.eq_ignore_ascii_case("cursor") && s.kind != "cursor");
+    // Strip retired kinds from older configs.
+    c.services.retain(|s| s.kind != "cursor");
     c.services.truncate(MAX_SERVICES);
     if c.refresh_minutes == 0 {
         c.refresh_minutes = 5;
@@ -162,9 +162,9 @@ pub fn load() -> Config {
     let p = path();
     match std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str::<Config>(&s).ok()) {
         Some(mut c) => {
-            let had_cursor = c.services.iter().any(|s| s.id.eq_ignore_ascii_case("cursor"));
+            let before = c.services.len();
             normalize(&mut c);
-            if had_cursor {
+            if c.services.len() != before {
                 save(&c);
             }
             c
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_removes_cursor() {
+    fn normalize_strips_retired_kinds() {
         let mut c = Config {
             services: vec![
                 svc("claude", "claude"),
@@ -259,7 +259,7 @@ mod tests {
             ..Config::default()
         };
         normalize(&mut c);
-        assert!(!c.services.iter().any(|s| s.id.eq_ignore_ascii_case("cursor")));
+        assert!(!c.services.iter().any(|s| s.kind == "cursor"));
         assert_eq!(c.services.len(), 2);
     }
 }
