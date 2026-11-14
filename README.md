@@ -20,11 +20,12 @@ Portable: keep `portable.txt` next to the exe; config and history live in `.\dat
 - Tray: Show/Hide, Always on top, Lock position, Start with Windows, Edit config, Reload config, Check for updates, Quit.
 - Quit only from the tray menu (or updater / reload restart).
 
-Columns are session, daily, and weekly (weekly falls back to a monthly window when weekly is missing).
+Columns are session, daily, and weekly (weekly falls back to a monthly window when weekly is missing). Hover a column header or percent cell to see when that window resets.
 
 ## Features
 
-- Compact table UI with service logos, plan badges, and thin percent bars
+- Compact table UI with service logos, plan badges, and Teknic cyan percent bars
+- Reset-time tooltips on session / daily / weekly columns
 - Tray icon with Show/Hide, always-on-top, lock position, and autostart
 - Local credential read at fetch time (not stored by the app)
 - Silent update check and toast on PROBLEM / recovery
@@ -75,7 +76,7 @@ python assets/make_icon.py
 ## Release
 
 1. Add a `## [x.y.z]` section to `CHANGELOG.md`.
-2. With a clean tree and user go-ahead: `.\release.ps1 -Version 0.1.0` (or `-Bump patch`).
+2. With a clean tree and user go-ahead: `.\release.ps1 -Version 0.2.0` (or `-Bump patch`).
 3. CI builds `AIUsageWidget-Setup.exe`, `AIUsageWidget-portable.zip`, and `SHA256SUMS.txt`.
 
 ## License

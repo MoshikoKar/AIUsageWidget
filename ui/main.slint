@@ -12,6 +12,9 @@ export struct ServiceView {
     daily-pct: float,
     weekly-pct: float,
     monthly-pct: float,
+    session-reset: string,
+    daily-reset: string,
+    weekly-reset: string,
     accent: color,
 }
 
@@ -62,32 +65,41 @@ component IconButton inherits Rectangle {
 }
 
 // Compact percent + thin bar (table cell).
-component PctCell inherits VerticalLayout {
+component PctCell inherits Rectangle {
     in property <string> value;
     in property <float> pct;
     in property <color> fill;
-    spacing: 3px;
+    in property <string> tip;
     width: 56px;
-    alignment: center;
+    height: 100%;
+    background: transparent;
 
-    Text {
-        text: root.value;
-        color: root.pct < 0 ? Palette.muted : root.fill;
-        font-size: 11px;
-        font-weight: 700;
-        horizontal-alignment: center;
-    }
-    Rectangle {
-        height: 3px;
-        border-radius: 1.5px;
-        background: Palette.track;
+    VerticalLayout {
+        spacing: 3px;
+        width: 100%;
+        alignment: center;
+
+        Text {
+            text: root.value;
+            color: root.pct < 0 ? Palette.muted : root.fill;
+            font-size: 11px;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
         Rectangle {
-            height: parent.height;
-            width: root.pct < 0 ? 0px : parent.width * min(1, max(0, root.pct / 100));
+            height: 3px;
             border-radius: 1.5px;
-            background: root.fill;
+            background: Palette.track;
+            Rectangle {
+                height: parent.height;
+                width: root.pct < 0 ? 0px : parent.width * min(1, max(0, root.pct / 100));
+                border-radius: 1.5px;
+                background: root.fill;
+            }
         }
     }
+
+    if root.tip != "": Tooltip { text: @markdown("\{root.tip}"); }
 }
 
 component ServiceLogo inherits Image {
@@ -100,20 +112,36 @@ component ServiceLogo inherits Image {
           : @image-url("../assets/logos/generic.png");
 }
 
-component ColHead inherits Text {
+component ColHead inherits Rectangle {
     in property <string> label;
-    text: root.label;
-    color: Palette.muted;
-    font-size: 8px;
-    font-weight: 700;
-    horizontal-alignment: center;
+    in property <string> tip;
     width: 56px;
+    height: 100%;
+    background: transparent;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ta.has-hover && root.tip != "" ? Palette.brand : Palette.muted;
+        font-size: 8px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea {
+        mouse-cursor: root.tip != "" ? help : default;
+    }
+    if root.tip != "": Tooltip { text: @markdown("\{root.tip}"); }
 }
 
 component ServiceRow inherits Rectangle {
     in property <ServiceView> s;
+    // Good meters use Teknic brand cyan; warn/bad keep status colors.
     property <color> tone: s.message != "" ? Palette.bad
-        : (s.status == 0 ? Palette.idle : Palette.status-color(s.status));
+        : s.status == 0 ? Palette.idle
+        : s.status == 1 ? Palette.brand
+        : Palette.status-color(s.status);
 
     height: 36px;
     background: transparent;
@@ -164,9 +192,9 @@ component ServiceRow inherits Rectangle {
         if s.message == "": HorizontalLayout {
             width: 176px; // 3x56 + 2x4 gaps - must match header metrics strip
             spacing: 4px;
-            PctCell { value: s.session; pct: s.session-pct; fill: root.tone; }
-            PctCell { value: s.daily; pct: s.daily-pct; fill: root.tone; }
-            PctCell { value: s.weekly; pct: s.weekly-pct; fill: root.tone; }
+            PctCell { value: s.session; pct: s.session-pct; fill: root.tone; tip: s.session-reset; }
+            PctCell { value: s.daily; pct: s.daily-pct; fill: root.tone; tip: s.daily-reset; }
+            PctCell { value: s.weekly; pct: s.weekly-pct; fill: root.tone; tip: s.weekly-reset; }
         }
 
         if s.message != "": Text {
@@ -193,6 +221,9 @@ export component MainWindow inherits Window {
     in property <string> subtitle: "loading...";
     in property <string> status-text: "STARTING";
     in property <int> overall: 0;
+    in property <string> session-tip;
+    in property <string> daily-tip;
+    in property <string> weekly-tip;
     in-out property <bool> on-top: true;
     in-out property <bool> locked: false;
     in-out property <bool> startup: false;
@@ -305,9 +336,9 @@ export component MainWindow inherits Window {
                     HorizontalLayout {
                         width: 176px;
                         spacing: 4px;
-                        ColHead { label: "SESSION"; }
-                        ColHead { label: "DAILY"; }
-                        ColHead { label: "WEEKLY"; }
+                        ColHead { label: "SESSION"; tip: root.session-tip; }
+                        ColHead { label: "DAILY"; tip: root.daily-tip; }
+                        ColHead { label: "WEEKLY"; tip: root.weekly-tip; }
                     }
                 }
             }

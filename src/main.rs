@@ -77,6 +77,153 @@ fn parse_color(hex: &str) -> slint::Color {
     slint::Color::from_rgb_u8(0x9c, 0xa3, 0xaf)
 }
 
+/// Parse provider reset stamps (RFC3339 / unix seconds / unix ms) into a SystemTime.
+fn parse_reset_instant(raw: &str) -> Option<std::time::SystemTime> {
+    use std::time::{Duration, UNIX_EPOCH};
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        let secs = if n > 10_000_000_000 { n / 1000 } else { n };
+        if secs >= 0 {
+            return Some(UNIX_EPOCH + Duration::from_secs(secs as u64));
+        }
+    }
+    // 2026-11-14T12:34:56.789Z / 2026-11-14T12:34:56+02:00 / ...0000000Z
+    let (body, sign, off) = if let Some(b) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
+        (b, 1i64, 0i64)
+    } else if let Some(idx) = s.rfind('+') {
+        let (b, o) = s.split_at(idx);
+        (b, 1i64, parse_offset(&o[1..])?)
+    } else {
+        // Distinguish date dashes from timezone: timezone starts after time 'T...'.
+        let idx = s.rfind('-')?;
+        if idx <= 10 {
+            return None;
+        }
+        let (b, o) = s.split_at(idx);
+        (b, -1i64, parse_offset(&o[1..])?)
+    };
+    let body = body.split('.').next().unwrap_or(body);
+    let parts: Vec<&str> = body.split('T').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let (ymd, hms): (Vec<_>, Vec<_>) = (
+        parts[0].split('-').collect(),
+        parts[1].split(':').collect(),
+    );
+    if ymd.len() != 3 || hms.len() < 2 {
+        return None;
+    }
+    let (y, mo, d) = (ymd[0].parse::<i32>().ok()?, ymd[1].parse::<u32>().ok()?, ymd[2].parse::<u32>().ok()?);
+    let (h, mi) = (hms[0].parse::<u32>().ok()?, hms[1].parse::<u32>().ok()?);
+    let sec = if hms.len() > 2 {
+        hms[2].parse::<u32>().unwrap_or(0)
+    } else {
+        0
+    };
+    let days = days_from_civil(y, mo, d)?;
+    let tod = (h as i64) * 3600 + (mi as i64) * 60 + (sec as i64) - sign * off;
+    let unix = days * 86400 + tod;
+    if unix < 0 {
+        return None;
+    }
+    Some(UNIX_EPOCH + Duration::from_secs(unix as u64))
+}
+
+fn parse_offset(s: &str) -> Option<i64> {
+    let p: Vec<&str> = s.split(':').collect();
+    if p.len() == 1 && p[0].len() == 4 {
+        let h: i64 = p[0][..2].parse().ok()?;
+        let m: i64 = p[0][2..].parse().ok()?;
+        return Some(h * 3600 + m * 60);
+    }
+    if p.is_empty() {
+        return None;
+    }
+    let h: i64 = p[0].parse().ok()?;
+    let m: i64 = if p.len() > 1 { p[1].parse().ok()? } else { 0 };
+    Some(h * 3600 + m * 60)
+}
+
+/// Civil date to days since Unix epoch (Howard Hinnant algorithm).
+fn days_from_civil(y: i32, m: u32, d: u32) -> Option<i64> {
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = y as i64 - if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let m = m as i64;
+    let d = d as i64;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146097 + doe - 719468)
+}
+
+fn format_remaining(when: std::time::SystemTime) -> String {
+    match when.duration_since(std::time::SystemTime::now()) {
+        Ok(d) => {
+            let secs = d.as_secs();
+            if secs < 60 {
+                "resets in <1m".into()
+            } else if secs < 3600 {
+                format!("resets in {}m", secs / 60)
+            } else if secs < 86400 {
+                let h = secs / 3600;
+                let m = (secs % 3600) / 60;
+                if m == 0 {
+                    format!("resets in {h}h")
+                } else {
+                    format!("resets in {h}h {m}m")
+                }
+            } else {
+                let days = secs / 86400;
+                let h = (secs % 86400) / 3600;
+                if h == 0 {
+                    format!("resets in {days}d")
+                } else {
+                    format!("resets in {days}d {h}h")
+                }
+            }
+        }
+        Err(_) => "reset due".into(),
+    }
+}
+
+fn fmt_reset(w: &Option<usage::Window>) -> SharedString {
+    let Some(w) = w else {
+        return SharedString::default();
+    };
+    if let Some(ref raw) = w.reset
+        && let Some(when) = parse_reset_instant(raw)
+    {
+        return format_remaining(when).into();
+    }
+    if w.derived.is_some() {
+        return "resets at local midnight".into();
+    }
+    SharedString::default()
+}
+
+fn column_tip(services: &[usage::ServiceSnapshot], pick: fn(&usage::ServiceSnapshot) -> &Option<usage::Window>) -> SharedString {
+    let mut lines: Vec<String> = Vec::new();
+    for s in services {
+        let tip = fmt_reset(pick(s));
+        if tip.is_empty() {
+            continue;
+        }
+        lines.push(format!("{}: {}", s.name, tip));
+    }
+    if lines.is_empty() {
+        SharedString::default()
+    } else {
+        lines.join("\n").into()
+    }
+}
+
 fn build_view(s: &usage::ServiceSnapshot, warn: f64, bad: f64) -> ServiceView {
     let status = usage::service_status(s, warn, bad);
     let plan = s.plan.clone().unwrap_or_default();
@@ -85,6 +232,7 @@ fn build_view(s: &usage::ServiceSnapshot, warn: f64, bad: f64) -> ServiceView {
     } else {
         String::new()
     };
+    let week = week_or_month(s);
     ServiceView {
         name: s.name.clone().into(),
         plan: plan.into(),
@@ -93,12 +241,15 @@ fn build_view(s: &usage::ServiceSnapshot, warn: f64, bad: f64) -> ServiceView {
         status,
         session: fmt_pct(&s.windows.session),
         daily: fmt_pct(&s.windows.daily),
-        weekly: fmt_pct(week_or_month(s)),
+        weekly: fmt_pct(week),
         monthly: "-".into(),
         session_pct: pct_or_missing(&s.windows.session),
         daily_pct: pct_or_missing(&s.windows.daily),
-        weekly_pct: pct_or_missing(week_or_month(s)),
+        weekly_pct: pct_or_missing(week),
         monthly_pct: -1.0,
+        session_reset: fmt_reset(&s.windows.session),
+        daily_reset: fmt_reset(&s.windows.daily),
+        weekly_reset: fmt_reset(week),
         accent: parse_color(&s.color),
     }
 }
@@ -397,6 +548,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     2 => "DEGRADED",
                     _ => "PROBLEM",
                 }));
+                ui.set_session_tip(column_tip(&snap.services, |s| &s.windows.session));
+                ui.set_daily_tip(column_tip(&snap.services, |s| &s.windows.daily));
+                ui.set_weekly_tip(column_tip(&snap.services, week_or_month));
                 if model.row_count() != views.len() {
                     model.set_vec(views);
                 } else {
@@ -415,4 +569,40 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.window().set_position(LogicalPosition::new(40.0, 40.0));
     }
     slint::run_event_loop_until_quit()
+}
+
+#[cfg(test)]
+mod reset_fmt_tests {
+    use super::*;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn parses_rfc3339_z() {
+        let t = parse_reset_instant("2026-11-14T12:00:00Z").unwrap();
+        let secs = t.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert_eq!(secs, 1_794_657_600);
+    }
+
+    #[test]
+    fn parses_unix_seconds_string() {
+        let t = parse_reset_instant("1794657600").unwrap();
+        assert_eq!(t.duration_since(UNIX_EPOCH).unwrap().as_secs(), 1_794_657_600);
+    }
+
+    #[test]
+    fn format_remaining_hours() {
+        let when = SystemTime::now() + Duration::from_secs(2 * 3600 + 14 * 60);
+        let s = format_remaining(when);
+        assert!(s.starts_with("resets in 2h"), "{s}");
+    }
+
+    #[test]
+    fn fmt_reset_derived_midnight() {
+        let w = Some(usage::Window {
+            pct: 10.0,
+            reset: None,
+            derived: Some("weekly".into()),
+        });
+        assert_eq!(fmt_reset(&w).as_str(), "resets at local midnight");
+    }
 }

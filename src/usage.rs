@@ -1,6 +1,8 @@
 //! Usage snapshot API: refresh worker + status math.
 
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -8,10 +10,49 @@ use std::time::{Duration, Instant};
 use crate::config::{self, Config};
 use crate::history;
 
+fn de_opt_reset<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ResetVisitor;
+    impl<'de> Visitor<'de> for ResetVisitor {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("reset timestamp string or unix seconds/ms")
+        }
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Self::Value, D2::Error> {
+            d.deserialize_any(ResetVisitor)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            let t = v.trim();
+            Ok(if t.is_empty() { None } else { Some(t.to_string()) })
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+            self.visit_str(&v)
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(Some(v.to_string()))
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(v.to_string()))
+        }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok(Some((v as i64).to_string()))
+        }
+    }
+    deserializer.deserialize_any(ResetVisitor)
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Window {
     pub pct: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_reset")]
     pub reset: Option<String>,
     #[serde(default)]
     pub derived: Option<String>,

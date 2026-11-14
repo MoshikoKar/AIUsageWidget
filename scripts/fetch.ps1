@@ -69,7 +69,19 @@ $UA  = 'ai-usage-widget/1.0'
 $cfg = $ConfigJson | ConvertFrom-Json
 $UA  = 'ai-usage-widget/1.0'
 
-function W($pct, $reset) { @{ pct = [math]::Round([double]$pct, 1); reset = $reset } }
+function NormReset($reset) {
+    if ($null -eq $reset -or "$reset" -eq '') { return $null }
+    if ($reset -is [datetime] -or $reset -is [datetimeoffset]) {
+        return ([DateTimeOffset]$reset).UtcDateTime.ToString('o')
+    }
+    if ($reset -is [string] -and $reset -match '[T:\-]') { return $reset }
+    try {
+        $n = [int64]$reset
+        if ($n -gt 10000000000) { $n = [int64][math]::Floor($n / 1000) }
+        return FromUnix $n
+    } catch { return "$reset" }
+}
+function W($pct, $reset) { @{ pct = [math]::Round([double]$pct, 1); reset = (NormReset $reset) } }
 function FromUnix($s) { [DateTimeOffset]::FromUnixTimeSeconds([int64]$s).UtcDateTime.ToString('o') }
 function Slot([double]$seconds) {
     if ($seconds -le 6 * 3600) { 'session' } elseif ($seconds -le 36 * 3600) { 'daily' }
